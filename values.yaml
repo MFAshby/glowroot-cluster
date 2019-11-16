@@ -1,0 +1,5 @@
+glowroot: 
+  image: mfashby/glowroot-central:0.13.5
+cassandra:
+  image: cassandra:3.11
+  nodeStorage: 5Gi

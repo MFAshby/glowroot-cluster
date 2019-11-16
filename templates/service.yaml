@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: glowroot-svc
+spec:
+  ports:
+    - name: cql
+      port: 9042
+    - name: thrift
+      port: 9160
+    - name: http
+      port: 4000
+    - name: grpc
+      port: 8181
+  selector:
+    app: glowroot
+  type: ClusterIP
+  # Use a headless service to allow jgroups to perform DNS service discovery
+  # When the service hostname is resolved; k8s DNS will return all the IP 
+  # addresses of participating pods.
+  clusterIP: None
+

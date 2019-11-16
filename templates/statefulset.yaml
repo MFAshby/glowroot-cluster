@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: glowroot
+spec:
+  selector:
+    matchLabels:
+      app: glowroot
+  serviceName: glowroot-svc
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: glowroot
+    spec:
+      terminationGracePeriodSeconds: 180
+      containers:
+      - name: glowroot
+        # Uses a custom build of glowroot while https://github.com/glowroot/glowroot/issues/626 is unresolved
+        image: {{ .Values.glowroot.image }}
+        env:
+          - name: GLOWROOT_OPTS
+            value: -Duser.language=en -Duser.country=GB -XX:+UnlockExperimentalVMOptions -XX:+UseCGroupMemoryLimitForHeap
+        livenessProbe:
+          httpGet:
+            path: "/"
+            port: 4000
+          initialDelaySeconds: 300
+          periodSeconds: 3
+          timeoutSeconds: 3
+        readinessProbe:
+          httpGet:
+            path: "/"
+            port: 4000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+        resources:
+          requests:
+            memory: "128Mi"
+          limits:
+            memory: "1024Mi"
+        volumeMounts:
+          - name: glowroot-config
+            mountPath: "/usr/share/glowroot-central/glowroot-central.properties"
+            subPath: "glowroot-central.properties"
+          - name: glowroot-config
+            mountPath: "/usr/share/glowroot-central/jgroups-dns.xml"
+            subPath: "jgroups-dns.xml"
+        ports:
+          - name: http
+            containerPort: 4000
+          - name: grpc
+            containerPort: 8181
+          - name: jgroups
+            containerPort: 7800
+
+      - name: cassandra
+        image: {{ .Values.cassandra.image }}
+        env:
+        - name: CASSANDRA_CGROUP_MEMORY_LIMIT
+          value: 'true'
+        - name: CASSANDRA_CLUSTER_NAME
+          value: glowroot-svc
+        - name: CASSANDRA_PROMETHEUS_ENABLED
+          value: 'true'
+        - name: CASSANDRA_SEEDS
+          value: glowroot-0.glowroot-svc.{{ .Release.Namespace }}.svc.cluster.local, glowroot-1.glowroot-svc.{{ .Release.Namespace }}.svc.cluster.local, glowroot-2.glowroot-svc.{{ .Release.Namespace }}.svc.cluster.local
+        ports:
+        - name: pure-intra
+          containerPort: 7000
+        - name: tls-intra
+          containerPort: 7001
+        - name: jmx
+          containerPort: 7199
+        - name: cql
+          containerPort: 9042
+        - name: thrift
+          containerPort: 9160
+        - name: prometheus
+          containerPort: 9404
+        # Cassandra won't run with less than this
+        resources:
+          requests:
+          #  cpu: 500m
+           memory: 4Gi
+          limits:
+          #  cpu: 500m
+           memory: 4Gi
+        volumeMounts:
+        - name: cassandra-pvc
+          mountPath: /var/lib/cassandra
+        livenessProbe:
+          exec:
+            command: [ "/bin/sh", "-c", "nodetool status" ]
+          initialDelaySeconds: 90
+          periodSeconds: 30
+        readinessProbe:
+          exec:
+            command: [ "/bin/sh", "-c", "nodetool status | grep -E \"^UN\\s+${POD_IP}\"" ]
+          initialDelaySeconds: 90
+          periodSeconds: 30
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - "/bin/sh"
+              - "-c"
+              - "nodetool drain"
+      volumes:
+        - name: glowroot-config
+          configMap:
+            name: glowroot-configmap
+      
+  volumeClaimTemplates:
+  - metadata:
+      name: cassandra-pvc
+      labels:
+        app: glowroot
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: {{ .Values.cassandra.nodeStorage }}
